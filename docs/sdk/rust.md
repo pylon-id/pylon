@@ -1,76 +1,77 @@
-# Rust SDK
+# Rust Integration
 
-**Status:** 🔄 Planned. Not yet available.
-
-Official Rust SDK for PYLON is under development. Use direct HTTP integration until released.
+Direct HTTP integration with `reqwest`.
 
 ---
 
-## Current Integration (Direct HTTP)
-
-Until the SDK is available, use reqwest:
+## Dependencies
 
 ```toml
 [dependencies]
-reqwest = {{ version = "0.11", features = ["json"] }}
-tokio = {{ version = "1", features = ["full"] }}
-serde = {{ version = "1.0", features = ["derive"] }}
-serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+subtle = "2"
 ```
 
+---
+
+## Start a Verification
+
 ```rust
-use reqwest;
-use serde::{{Deserialize, Serialize}};
-use std::env;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
-struct VerifyAgeRequest {{
-    policy: AgePolicy,
+struct VerifyRequest {
+    policy: Policy,
     #[serde(rename = "callbackUrl")]
     callback_url: String,
-}}
+}
 
 #[derive(Serialize)]
-struct AgePolicy {{
+struct Policy {
     #[serde(rename = "minAge")]
     min_age: u32,
-}}
+}
 
 #[derive(Deserialize)]
-struct VerifyAgeResponse {{
+struct VerifyResponse {
     #[serde(rename = "verificationId")]
     verification_id: String,
-    status: String,
     #[serde(rename = "walletUrl")]
     wallet_url: String,
-}}
+    #[serde(rename = "requestUri")]
+    request_uri: String,
+    #[serde(rename = "expiresAt")]
+    expires_at: String,
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    let api_key = env::var("PYLON_API_KEY")?;
-    
-    let request = VerifyAgeRequest {{
-        policy: AgePolicy {{ min_age: 18 }},
-        callback_url: "https://app.example.com/webhooks/pylon".to_string(),
-    }};
-    
-    let client = reqwest::Client::new();
-    let resp = client
-        .post("{BASE_URL}/v1/verify/age")
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {{}}", api_key))
-        .json(&request)
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = std::env::var("PYLON_API_KEY")?;
+
+    let resp: VerifyResponse = reqwest::Client::new()
+        .post("https://pylonid.eu/v1/verify/age")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .json(&VerifyRequest {
+            policy: Policy { min_age: 18 },
+            callback_url: "https://yourapp.com/webhooks/pylon".into(),
+        })
         .send()
+        .await?
+        .json()
         .await?;
-    
-    let result: VerifyAgeResponse = resp.json().await?;
-    
-    println!("Verification ID: {{}}", result.verification_id);
-    println!("Wallet URL: {{}}", result.wallet_url);
-    // Redirect user to result.wallet_url
-    
+
+    println!("Verification: {}", resp.verification_id);
+    println!("Wallet URL:   {}", resp.wallet_url);
+    // Display resp.wallet_url as QR code
+
     Ok(())
-}}
+}
 ```
 
 ---
@@ -78,150 +79,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {{
 ## Handle Webhooks (Axum)
 
 ```rust
-use axum::{{
-    extract::State,
-    http::{{HeaderMap, StatusCode}},
-    response::IntoResponse,
-    routing::post,
-    Json, Router,
-}};
-use serde::{{Deserialize, Serialize}};
-use hmac::{{Hmac, Mac}};
+use axum::{http::{HeaderMap, StatusCode}, routing::post, Json, Router};
+use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use hex;
+use subtle::ConstantTimeEq;
 
-#[derive(Deserialize)]
-struct WebhookPayload {{
-    #[serde(rename = "verificationId")]
-    verification_id: String,
-    result: String,
-}}
+type HmacSha256 = Hmac<Sha256>;
 
-fn validate_signature(signature: &str, body: &str, secret: &str) -> bool {{
-    let parts: Vec<&str> = signature.split(',').collect();
-    if parts.len() != 2 {{
-        return false;
-    }}
-    
-    let t = parts[0].trim_start_matches("t=");
-    let v1 = parts[1].trim_start_matches("v1=");
-    
-    let signed_message = format!("{{}}.{{}}", t, body);
-    
-    type HmacSha256 = Hmac<Sha256>;
+fn validate_signature(body: &[u8], signature: &str, secret: &str) -> bool {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-    mac.update(signed_message.as_bytes());
-    let computed = hex::encode(mac.finalize().into_bytes());
-    
-    v1 == computed
-}}
+    mac.update(body);
+    let computed = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+    computed.as_bytes().ct_eq(signature.as_bytes()).into()
+}
 
-async fn pylon_webhook(
+async fn webhook_handler(
     headers: HeaderMap,
     body: String,
-) -> Result<Json<serde_json::Value>, StatusCode> {{
-    let signature = headers
-        .get("x-pylon-signature")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    
-    let secret = std::env::var("PYLON_WEBHOOK_SECRET")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    if !validate_signature(signature, &body, &secret) {{
-        return Err(StatusCode::UNAUTHORIZED);
-    }}
-    
-    let payload: WebhookPayload = serde_json::from_str(&body)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-    
-    if payload.result == "verified" {{
-        println!("✅ Verified!");
-        return Ok(Json(serde_json::json!({{"received": true}})));
-    }}
-    
-    Ok(Json(serde_json::json!({{"received": true}})))
-}}
-
-#[tokio::main]
-async fn main() {{
-    let app = Router::new()
-        .route("/webhooks/pylon", post(pylon_webhook));
-    
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .unwrap();
-    
-    axum::serve(listener, app).await.unwrap();
-}}
-```
-
-Required dependencies:
-
-```toml
-[dependencies]
-axum = "0.7"
-tokio = {{ version = "1", features = ["full"] }}
-serde = {{ version = "1.0", features = ["derive"] }}
-serde_json = "1.0"
-hmac = "0.12"
-sha2 = "0.10"
-hex = "0.4"
-```
-
----
-
-## Idempotency Handling
-
-```rust
-use std::collections::HashSet;
-use std::sync::Mutex;
-
-// In production, use a database instead
-lazy_static::lazy_static! {{
-    static ref PROCESSED: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
-}}
-
-async fn pylon_webhook(
-    headers: HeaderMap,
-    body: String,
-) -> Result<Json<serde_json::Value>, StatusCode> {{
-    let idempotency_key = headers
-        .get("x-pylon-idempotency-key")
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::BAD_REQUEST)?;
-    
-    // Check if already processed
-    {{
-        let processed = PROCESSED.lock().unwrap();
-        if processed.contains(idempotency_key) {{
-            return Ok(Json(serde_json::json!({{"status": "already_processed"}})));
-        }}
-    }}
-    
-    // Validate signature
+) -> Result<Json<serde_json::Value>, StatusCode> {
     let signature = headers.get("x-pylon-signature")
         .and_then(|v| v.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    
+
     let secret = std::env::var("PYLON_WEBHOOK_SECRET")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    if !validate_signature(signature, &body, &secret) {{
+
+    if !validate_signature(body.as_bytes(), signature, &secret) {
         return Err(StatusCode::UNAUTHORIZED);
-    }}
-    
-    // Store idempotency key
-    {{
-        let mut processed = PROCESSED.lock().unwrap();
-        processed.insert(idempotency_key.to_string());
-    }}
-    
-    // Return 200 immediately
-    Ok(Json(serde_json::json!({{"received": true}})))
-    
-    // Process asynchronously (spawn background task)
-}}
+    }
+
+    let payload: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    println!("{}: {}", payload["verificationId"], payload["status"]);
+
+    Ok(Json(serde_json::json!({"received": true})))
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new().route("/webhooks/pylon", post(webhook_handler));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
 ```
 
 ---
@@ -229,50 +129,22 @@ async fn pylon_webhook(
 ## Error Handling
 
 ```rust
-match client
-    .post("{BASE_URL}/v1/verify/age")
-    .header("Authorization", format!("Bearer {{}}", api_key))
-    .json(&request)
-    .send()
-    .await
-{{
-    Ok(resp) => match resp.status().as_u16() {{
-        401 => eprintln!("❌ Invalid API key"),
-        429 => eprintln!("❌ Rate limited"),
-        400 => eprintln!("❌ Invalid request"),
-        200..=299 => println!("✅ Success"),
-        code => eprintln!("❌ Error: {{}}", code),
-    }},
-    Err(e) => eprintln!("❌ Network error: {{}}", e),
-}}
-```
-
----
-
-## Testing Locally
-
-Start the local emulator:
-
-```bash
-pylon-cli
-```
-
-Point requests to localhost:
-
-```rust
-let resp = client
-    .post("http://localhost:7777/v1/verify/age")
+let resp = reqwest::Client::new()
+    .post("https://pylonid.eu/v1/verify/age")
+    .header("Authorization", format!("Bearer {api_key}"))
     .json(&request)
     .send()
     .await?;
+
+match resp.status().as_u16() {
+    200 => { /* success */ }
+    401 => eprintln!("Invalid API key"),
+    400 => eprintln!("Invalid request"),
+    429 => eprintln!("Rate limited — back off and retry"),
+    code => eprintln!("Unexpected: {code}"),
+}
 ```
 
 ---
 
-## Roadmap
-
-- **Q1 2026:** Official Rust SDK with async-first design using Tokio
-
----
-
-**Questions?** See [Troubleshooting](../8-troubleshooting.md) or [API Reference](../3-api-reference.md)
+**Reference:** [API Reference](../3-api-reference.md) | [Webhooks](../6-webhooks.md) | [Troubleshooting](../8-troubleshooting.md)

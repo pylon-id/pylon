@@ -1,81 +1,130 @@
 # Security & Compliance
 
-PYLON is a privacy-first project designed and developed independently by a sole developer. This document describes implemented security measures, compliance goals, and your responsibilities.
+PylonID is designed and developed independently by a sole developer. This document describes implemented security measures, compliance posture, and your responsibilities.
 
-***
+---
 
 ## Data Sovereignty
 
-- All verification data processing is designed to occur within the EU.
-- There are currently **no external subprocessors** or third-party data processors involved.
-- Efforts are made to comply with EU data privacy regulations.
+- All data processing occurs within the EU (self-hosted on EU infrastructure)
+- No external sub-processors or third-party data processors
+- No data leaves the deployment — PylonID doesn't phone home
 
-***
+---
+
+## Encryption
+
+### At Rest
+- **AES-256-GCM** encryption for sensitive data in PostgreSQL
+- Master encryption key provided via environment variable
+- API keys hashed with bcrypt before storage
+
+### In Transit
+- **TLS 1.3** minimum for all external connections
+- EUDI wallet communication over HTTPS
+- Webhook delivery over HTTPS only
+
+### Cryptographic Standards
+- **ES256** (ECDSA P-256 + SHA-256) for authorization request signing
+- **ES256** for SD-JWT-VC issuer signature verification
+- **HMAC-SHA256** for webhook payload signing
+- **JWKS** for public key distribution and rotation
+
+---
+
+## Authentication & Authorization
+
+- API key authentication for all SMB endpoints
+- Keys generated with cryptographic randomness
+- Keys hashed with bcrypt — PylonID cannot retrieve your plaintext key
+- Key rotation via `POST /v1/auth/rotate` (immediate invalidation of old key)
+
+---
+
+## Webhook Security
+
+- Every webhook signed with HMAC-SHA256
+- Signature in `X-Pylon-Signature: sha256={hex}` header
+- Constant-time signature comparison (timing-attack resistant)
+- HTTPS-only delivery (HTTP callback URLs rejected)
+
+---
+
+## Credential Verification
+
+PylonID validates every presented credential:
+
+1. **Issuer trust** — credential must come from a configured PID Issuer
+2. **Signature** — ES256 signature verified against issuer's JWKS
+3. **Credential type** — must be `urn:eudi:pid:1`
+4. **Key binding** — wallet proves possession of credential private key
+5. **Freshness** — Key Binding JWT must be within 5-minute window
+6. **Nonce** — must match the original authorization request
+
+---
+
+## Data Minimization
+
+- Only requested attributes are disclosed (selective disclosure via SD-JWT-VC)
+- Age verification reveals only `age_over_18` (boolean), not birthdate
+- Verification records store the result, not the raw credential
+- Automatic cleanup of expired records via background worker
+
+---
 
 ## Compliance Status
 
-- No formal certifications (ISO 27001, SOC 2, TISAX) or official audits have been obtained yet.
-- The system is architected to follow standards such as eIDAS 2.0, OID4VP, SD-JWT, and ISO 18013.
-- Plans for formal certification and audits are considered future goals.
+| Standard | Status |
+|----------|--------|
+| eIDAS 2.0 | Architecturally compliant (OpenID4VP, SD-JWT-VC) |
+| GDPR | Designed for compliance (data minimization, EU-only) |
+| ISO 27001 | Not certified (planned) |
+| SOC 2 | Not audited (planned) |
 
-***
+PylonID is a beta product developed by a solo developer. No formal certifications or third-party audits have been obtained yet. The system is architected to follow EU standards and best practices.
 
-## Security Measures
+---
 
-- Transport encryption with TLS 1.3 minimum
-- HMAC-SHA256 webhook signatures with replay protection
-- API key-based authentication and planned rotation workflow
-- Rate limiting to mitigate abuse
-- Minimal attribute storage, retaining only verified flags and audit linkage
+## Audit Logging
 
-***
+- Immutable audit trail for verification events
+- Anonymized IP logging
+- Logs retained for 1 year minimum
 
-## Developer & User Responsibilities
+---
 
-- Review suitability and compliance requirements for your use case.
-- Store API keys securely and rotate them periodically.
-- Use HTTPS-only webhook endpoints and validate all webhook signatures.
-- Implement idempotent webhook processing to avoid duplicates.
-- Respect data retention and GDPR requirements for personal data.
+## Your Responsibilities
 
-***
+- Store API keys securely (secrets manager, not source code)
+- Rotate API keys periodically
+- Validate webhook signatures on every request
+- Use HTTPS-only webhook endpoints
+- Implement idempotent webhook processing
+- Define data retention policies for verification results
+- Update your privacy policy to mention EUDI wallet verification
+- Handle GDPR data subject requests for verification data
 
-## Audit & Logging
-
-- Immutable audit trails recording verification events with anonymized IPs.
-- Logs maintained for at least 1 year available via API.
-- Recommendation to log webhook handling, access, and deletions.
-
-***
+---
 
 ## Incident Response
 
-- Report suspected breaches immediately to security@pylonid.eu.
-- Revoke compromised API keys immediately.
-- PYLON will assist investigations and communications if the platform is affected.
+- Report security issues to [security@pylonid.eu](mailto:security@pylonid.eu)
+- Revoke compromised API keys immediately via `POST /v1/auth/rotate`
+- PylonID will assist investigations if the platform is affected
 
-***
+---
 
-## Security Checklist Prior to Production
+## Security Checklist
 
-- API keys secured and rotated
-- Webhook security enforced with signatures and HTTPS
-- Idempotency enforced on webhook processing
-- Privacy policy updated to mention PYLON integration
-- Data retention policies defined and implemented
-- Monitoring and alerting configured
+- [ ] API key in secrets manager
+- [ ] Webhook signature validation implemented
+- [ ] HTTPS webhook endpoint with valid certificate
+- [ ] Key rotation process documented
+- [ ] Privacy policy updated
+- [ ] Data retention policies defined
+- [ ] Monitoring and alerting configured
 
-***
+---
 
-## Contact & Support
-
-- Security incidents: security@pylonid.eu
-- Compliance queries: compliance@pylonid.eu
-- General support: support@pylonid.eu
-
-***
-
-## Questions?
-
-See [Troubleshooting](./8-troubleshooting.md) or email [support@pylonid.eu](mailto:support@pylonid.eu)
-]
+**Security contact:** [security@pylonid.eu](mailto:security@pylonid.eu)
+**General questions:** [hello@pylonid.eu](mailto:hello@pylonid.eu)

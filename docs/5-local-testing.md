@@ -1,249 +1,171 @@
 # Local Testing with Emulator
 
-**Status:** ✅ Production Ready
+Test the full age verification flow offline, without a real EUDI wallet.
+
+---
 
 ## Quick Start
 
-The local emulator lets you test age verification without needing a real EUDI wallet.
-
-### Prerequisites
-
 ```bash
-# Ensure Rust 1.75+ is installed
-rustc --version
-
-# Build the emulator
-cd ~/webstack/sites/pylon/pylon-cli
+cd pylon_cli
 cargo build --release
-```
-
-### Run the Emulator
-
-```bash
-# Start emulator on localhost:7777
 ./target/release/pylon-cli
 ```
 
-**Output:**
-```
-✨ PYLON Emulator Starting...
-  🌐 Fake API: http://localhost:7777
-  👤 Fake Wallet: http://localhost:7777
-  📝 Ready for testing!
-```
+The emulator starts on `http://localhost:7777` and provides the same API as the production server.
 
-***
+---
 
 ## Test Workflow
 
-### Step 1: Create Age Verification
+### Step 1: Create a Verification
 
 ```bash
-curl -X POST http://localhost:7777/v1/verify/age \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "policy": {"minAge": 18},
-    "callbackUrl": "http://localhost:3000/webhook"
-  }'
+curl -X POST http://localhost:7777/v1/verify/age \
+  -H "Content-Type: application/json" \
+  -d '{
+    "policy": { "minAge": 18 },
+    "callbackUrl": "http://localhost:3000/webhook"
+  }'
 ```
 
 **Response:**
 ```json
 {
-  "verificationId": "ver_local_ABC123",
-  "status": "pending",
-  "walletUrl": "http://localhost:7777/scan/ver_local_ABC123"
+  "verificationId": "ver_local_ABC123",
+  "status": "pending",
+  "walletUrl": "http://localhost:7777/scan/ver_local_ABC123"
 }
 ```
 
-Save the `verificationId` for later.
+### Step 2: Simulate Wallet Response
 
-### Step 2: Open Fake Wallet UI
+Open `http://localhost:7777/scan/ver_local_ABC123` in your browser. You'll see a simple UI with **Accept** and **Reject** buttons.
 
-In your browser, visit:
-```
-http://localhost:7777/scan/ver_local_ABC123
-```
+- **Accept** → emulator fires webhook with `"status": "verified"`
+- **Reject** → emulator fires webhook with `"status": "rejected"`
 
-You'll see a fake wallet interface with **Accept** and **Reject** buttons.
-
-### Step 3: Accept Verification
-
-Click the **Accept** button. The emulator will:
-1. Create a test credential presentation
-2. Validate the age logic
-3. Fire a webhook to your callback URL
-4. Mark the verification as completed
-
-### Step 4: Receive Webhook
+### Step 3: Receive Webhook
 
 Your webhook endpoint at `http://localhost:3000/webhook` receives:
 
 ```json
 {
-  "verificationId": "ver_local_ABC123",
-  "type": "age",
-  "result": "verified",
-  "attributes": {
-    "ageOver18": true
-  },
-  "evidence": {
-    "issuer": "LOCAL_TEST",
-    "credentialType": "SD-JWT VC",
-    "proofHash": "sha256:test123...",
-    "issuedAt": "2025-01-15T14:30:00Z"
-  },
-  "audit": {
-    "traceId": "trace_ver_local_ABC123"
-  }
+  "event": "verification.completed",
+  "verificationId": "ver_local_ABC123",
+  "status": "verified",
+  "result": { "age_over_18": true },
+  "timestamp": "2026-04-22T00:05:00Z"
 }
 ```
 
-***
+---
 
-## Test with Your App
-
-### Express.js Example
+## Integration Example (Express.js)
 
 ```javascript
 const express = require('express');
 const app = express();
 app.use(express.json());
 
-// Step 1: Create verification request
+// Start verification
 app.get('/start', async (req, res) => {
-  const resp = await fetch('http://localhost:7777/v1/verify/age', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      policy: { minAge: 18 },
-      callbackUrl: 'http://localhost:3000/webhook'
-    })
-  });
-  const data = await resp.json();
-  res.redirect(data.walletUrl); // Redirect to fake wallet UI
+  const resp = await fetch('http://localhost:7777/v1/verify/age', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      policy: { minAge: 18 },
+      callbackUrl: 'http://localhost:3000/webhook'
+    })
+  });
+  const data = await resp.json();
+  res.json(data); // Return walletUrl to display as QR
 });
 
-// Step 2: Receive webhook
+// Receive webhook
 app.post('/webhook', (req, res) => {
-  const { verificationId, result } = req.body;
-  console.log(`✅ Verification ${verificationId}: ${result}`);
-  res.status(200).json({ received: true });
+  console.log(`${req.body.verificationId}: ${req.body.status}`);
+  res.status(200).json({ received: true });
 });
 
-app.listen(3000, () => console.log('App running on :3000'));
+app.listen(3000, () => console.log('App on :3000'));
 ```
 
-**Test it by running:**
+**Test it:**
 ```bash
-# In terminal 1, start your app
+# Terminal 1: Start your app
 node app.js
 
-# In terminal 2, start PYLON emulator
-./target/release/pylon-cli
+# Terminal 2: Start emulator
+cd pylon_cli && cargo run --release
 
-# In terminal 3, trigger verification
+# Terminal 3: Trigger verification
 curl http://localhost:3000/start
+# Open the returned walletUrl in browser, click Accept
 ```
 
-Then:
-- Browser opens fake wallet at `http://localhost:7777/scan/...`
-- Click **Accept**
-- See console log: ✅ Verification ver_local_ABC123: verified
+---
 
-***
-
-## Testing Webhook Retries
-
-The emulator doesn't retry, but production API does. To test:
-```bash
-# Start a failing webhook server that returns 500
-python3 -c "
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class FailHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        self.send_response(500)
-        self.end_headers()
-
-HTTPServer(('', 4000), FailHandler).serve_forever()
-"
-
-# Use callbackUrl pointing to failing server
-curl -X POST http://localhost:7777/v1/verify/age \\
-  -d '{"policy":{"minAge":18},"callbackUrl":"http://localhost:4000/webhook"}'
-```
-
-Production retries with exponential backoff from 1s to 32s.
-
-***
-
-## Emulator Features
-
-| Feature | Behavior |
-|---------|----------|
-| **Age Validation** | Checks `minAge` against mock credential |
-| **Webhook Firing** | Sends POST to callback URL immediately |
-| **State** | In-memory, clears on restart |
-| **Retry** | None (fires once immediately) |
-| **Signature** | No signature validation |
-
-***
-
-## Production Differences
+## Emulator vs Production
 
 | Aspect | Emulator | Production |
 |--------|----------|------------|
-| **URL** | `http://localhost:7777` | `https://pylonid.eu` |
-| **Wallet** | Fake HTML UI | Real German EUDI wallet |
-| **Signatures** | Mocked | Real OID4VP signature verification |
-| **Retry** | None | Exponential backoff retries |
-| **Storage** | In-memory | PostgreSQL persistent |
-| **Auth** | None | API key required (Q1 2026) |
+| URL | `http://localhost:7777` | `https://pylonid.eu` |
+| Wallet | Browser UI (Accept/Reject) | Real EUDI wallet app |
+| Signatures | No SD-JWT-VC validation | Full ES256 + JWKS verification |
+| Webhooks | Fires immediately, no retries | Retries with exponential backoff |
+| Storage | In-memory (clears on restart) | PostgreSQL |
+| Auth | No API key required | API key required |
+| Webhook signing | No signature | HMAC-SHA256 signed |
 
-***
+---
+
+## Prerequisites
+
+```bash
+# Rust 1.75+
+rustc --version
+
+# Build
+cd pylon_cli
+cargo build --release
+```
+
+---
 
 ## Troubleshooting
 
-### Port 7777 Already in Use
+### Port 7777 already in use
 
 ```bash
-lsof -i :7777   # Find process using port
-kill -9 <PID>   # Kill blocking process
+lsof -i :7777
+kill -9 <PID>
 ```
 
-### Webhook Not Firing
+### Webhook not firing
 
-Test webhook endpoint locally:
-
+Test that your endpoint is reachable:
 ```bash
-curl -X POST http://localhost:3000/webhook \\
-  -H "Content-Type: application/json" \\
-  -d '{"test":true}'
+curl -X POST http://localhost:3000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"test": true}'
 ```
 
-### Verification Not Found
+### Connection refused
 
-Make sure verification ID matches format:
+Emulator not running. Start it with `cargo run --release` from the `pylon_cli` directory.
 
-```
-ver_local_XXXXXXXX
-```
-
-***
+---
 
 ## Next Steps
 
-1. Integrate official SDKs (Go, JS, Python, Rust, Java)
-2. Test error handling by sending invalid payloads
-3. Test webhooks for proper app behavior
-4. Move to production with real URLs
+Once your integration works locally:
+1. Switch to `https://pylonid.eu` with a real API key
+2. Add webhook signature validation (emulator doesn't sign, production does)
+3. Test with a real EUDI wallet
 
-See [API Reference](./3-api-reference.md) for full API docs.
+See [Integration & Testing](./4-sandbox-guide.md) for the full testing progression.
 
-***
+---
 
-## Questions?
-
-See [Troubleshooting](./8-troubleshooting.md) or email support@pylonid.eu
-]
+**Questions?** See [Troubleshooting](./8-troubleshooting.md) or email [hello@pylonid.eu](mailto:hello@pylonid.eu)

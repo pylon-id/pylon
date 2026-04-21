@@ -1,54 +1,88 @@
-# What is PYLON?
+# What is PylonID?
 
-**PYLON** is a developer-friendly API for European Digital Identity (EUDI) wallet integration. Instead of learning 500+ pages of cryptographic standards (OID4VC, SD-JWT VC, ISO 18013-5), you call simple REST endpoints.
+**PylonID** is a turnkey API for verifying attributes from European Digital Identity (EUDI) wallets. Instead of implementing 500+ pages of cryptographic standards, you call one REST endpoint.
 
-## One Endpoint. Three Outcomes.
+## One Endpoint. One QR Code. One Webhook.
 
 ```bash
 POST /v1/verify/age
 {
   "policy": { "minAge": 18 },
-  "callbackUrl": "https://app.example.com/webhooks/pylon"
+  "callbackUrl": "https://yourapp.com/webhooks/pylon"
 }
 ```
 
-Returns:
-- `verificationId`: Unique ID for this request
-- `walletUrl`: QR code for user to scan with EUDI wallet
+Returns a `walletUrl` — display it as a QR code. Customer scans with their EUDI wallet, consents, and you receive a signed webhook with the result. That's it.
 
-User scans → Wallet presents credential → PYLON validates → Your webhook fires with result. That's it.
+## How It Works
 
-## Core Features
+```
+Your app                          PylonID                         EUDI Wallet
+   │                                 │                                 │
+   │  POST /v1/verify/age            │                                 │
+   │────────────────────────────────>│                                 │
+   │  { walletUrl, verificationId }  │                                 │
+   │<────────────────────────────────│                                 │
+   │                                 │                                 │
+   │  Show QR code (walletUrl)       │                                 │
+   │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ >│
+   │                                 │   Wallet fetches request JWT    │
+   │                                 │<────────────────────────────────│
+   │                                 │   Signed authorization request  │
+   │                                 │────────────────────────────────>│
+   │                                 │                                 │
+   │                                 │   User consents                 │
+   │                                 │                                 │
+   │                                 │   Wallet sends VP token         │
+   │                                 │<────────────────────────────────│
+   │                                 │                                 │
+   │  Webhook: verified/rejected     │                                 │
+   │<────────────────────────────────│                                 │
+```
 
-- **Age Verification**: Selective disclosure for age gates
-- **KYC Reuse**: Leverage verified attributes without storing PII
-- **OIDC Login**: "Sign in with EUDI" via OpenID Connect
-- **Qualified Signatures**: ETSI-compliant digital signatures
+## Current Status
 
-## Why PYLON?
+🟢 **Beta** — OpenID4VP age verification with real EUDI wallet support.
 
-| Feature | PYLON |
-|---------|-------|
+### Working Now
+- ✅ Age verification via OpenID4VP
+- ✅ SD-JWT-VC parsing and ES256 signature verification
+- ✅ Signed authorization request objects
+- ✅ Key Binding JWT verification
+- ✅ JWKS fetching from PID Issuer
+- ✅ HMAC-SHA256 signed webhooks
+- ✅ API key management (signup, rotation)
+- ✅ Integrated PID Issuer (Keycloak + EUDI reference issuer)
+
+### Planned
+- 🔄 KYC attribute verification (Q3 2026)
+- 🔄 OAuth/OIDC "Sign in with EUDI" (Q4 2026)
+- 🔄 Official SDKs — Go, JS, Python, Rust, Java (Q4 2026)
+
+## Why PylonID?
+
+| | |
+|---|---|
 | **Time to integrate** | 10 minutes |
-| **Learning curve** | Minimal (REST API, not cryptography) |
-| **Data sovereignty** | EU-only, no US sub-processors |
-| **Lock-in** | None (standards-native, export guaranteed) |
-| **Developer DX** | SDKs, emulator, Postman, docs |
+| **Learning curve** | REST API, not cryptography |
+| **Data sovereignty** | EU-only, self-hosted, no US sub-processors |
+| **Lock-in** | None — standards-native (OpenID4VP, SD-JWT-VC) |
+| **Deployment** | Self-hosted via Docker Compose |
 
 ## eIDAS 2.0 Compliance
 
-The European Digital Identity Regulation (eIDAS 2.0) mandates:
-- **Dec 2026**: Member states provide EUDI Wallet to citizens
-- **Dec 2027**: Financial, healthcare, and mobility sectors **must** accept EUDI Wallet
+The European Digital Identity Regulation mandates:
+- **Dec 2026**: Member states must provide EUDI wallets to citizens
+- **Dec 2027**: Financial, healthcare, and mobility sectors **must** accept EUDI wallets
 
-PYLON is built for this deadline. Start integrating now.
+PylonID is built for this deadline.
 
 ## Next Steps
 
-- **5 minutes**: Read [Quickstart](./1-quickstart.md)
-- **15 minutes**: Try the [Local Emulator](./5-local-testing.md)
-- **30 minutes**: Deploy to [Sandbox](./4-sandbox-guide.md)
+- **5 minutes**: [Quickstart](./1-quickstart.md) — verify your first age
+- **15 minutes**: [Local Emulator](./5-local-testing.md) — test without a wallet
+- **30 minutes**: [Self-host](./4-sandbox-guide.md) — deploy your own instance
 
 ---
 
-**Questions?** Check [Troubleshooting](./8-troubleshooting.md) or email support@pylonid.eu
+**Questions?** See [Troubleshooting](./8-troubleshooting.md) or email [hello@pylonid.eu](mailto:hello@pylonid.eu)

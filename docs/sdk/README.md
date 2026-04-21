@@ -1,125 +1,53 @@
-# PYLON SDKs
+# SDKs
 
-Official SDKs for PYLON. Development in progress.
-
----
-
-## SDK Status
+Official SDKs are planned for Q4 2026. Until then, integrate directly via HTTP — the API is intentionally simple.
 
 | Language | Package | Status |
 |----------|---------|--------|
-| **Go** | `github.com/pylon-id/sdk-go` | 🔄 Planned |
-| **JavaScript/TypeScript** | `@pylon-id/sdk` | 🔄 Planned |
-| **Python** | `pylon-id` | 🔄 Planned |
-| **Rust** | `pylon-sdk` | 🔄 Planned |
-| **Java** | `com.pylonid:sdk` | 🔄 Planned |
+| [Go](./go.md) | `github.com/pylon-id/sdk-go` | Planned (Q4 2026) |
+| [JavaScript/TypeScript](./javascript.md) | `@pylon-id/sdk` | Planned (Q4 2026) |
+| [Python](./python.md) | `pylon-id` | Planned (Q4 2026) |
+| [Java](./java.md) | `com.pylonid:sdk` | Planned (Q4 2026) |
+| [Rust](./rust.md) | `pylon-sdk` | Planned (Q4 2026) |
 
-All SDKs are under development. Direct API integration is currently recommended.
-
----
-
-## Current Integration Method
-
-Use direct HTTP requests to the PYLON API until SDKs are released.
-
-### API Endpoint
-
-```
-{BASE_URL}
-```
-
-### Local Testing
-
-```
-http://localhost:7777
-```
-
-Use the local emulator (`pylon-cli`) for development.
+Each SDK page includes complete working examples for direct HTTP integration — calling the API, handling webhooks, and validating signatures.
 
 ---
 
-## Common Integration Pattern
+## Integration Pattern
 
-1. Initialize HTTP client with API key
-2. Call `POST /v1/verify/age` with policy and callback URL
-3. Get `walletUrl` from response
-4. Redirect user to `walletUrl`
-5. Receive webhook when verification completes
-6. Validate webhook signature (HMAC-SHA256)
-7. Process verification result
+Every language follows the same pattern:
+
+1. Call `POST /v1/verify/age` with your API key, policy, and callback URL
+2. Get `walletUrl` from the response — display as QR code
+3. Customer scans with EUDI wallet and consents
+4. PylonID POSTs result to your `callbackUrl`
+5. Validate the `X-Pylon-Signature` header (HMAC-SHA256)
+6. Process the verification result
+
+---
+
+## Webhook Signature
+
+Every webhook includes an `X-Pylon-Signature` header:
+
+```
+X-Pylon-Signature: sha256=a1b2c3d4e5f6...
+```
+
+This is `HMAC-SHA256(your_webhook_secret, raw_request_body)` formatted as `sha256={hex}`.
+
+**Always validate signatures** and **always use the raw request body** (before JSON parsing). See each SDK page for language-specific examples, or the [Webhooks guide](../6-webhooks.md) for full details.
 
 ---
 
 ## Environment Variables
 
 ```bash
-export PYLON_API_KEY=<your-api-key>
-export PYLON_WEBHOOK_SECRET=<your-webhook-secret>
+export PYLON_API_KEY="pyl_..."
+export PYLON_WEBHOOK_SECRET="your-webhook-secret"
 ```
 
 ---
 
-## Webhook Signature Validation
-
-**Critical:** Always validate webhook signatures to prevent spoofed requests.
-
-### Validation Steps
-
-1. Extract `X-Pylon-Signature` header
-2. Get raw request body (bytes, before JSON parsing)
-3. Retrieve webhook secret from environment
-4. Compute HMAC-SHA256 signature
-5. Compare using timing-safe comparison
-
-See [Webhooks Guide](../6-webhooks.md) for implementation examples in multiple languages.
-
----
-
-## Error Handling
-
-Common error codes:
-
-| Code | Meaning | Action |
-|------|---------|--------|
-| `INVALID_API_KEY` | API key missing or invalid | Check environment variable |
-| `INVALID_CALLBACK_URL` | Callback not HTTPS | Use valid HTTPS URL |
-| `NETWORK_ERROR` | Network failure | Retry with backoff |
-| `UNKNOWN_ERROR` | Server error | Contact support if persists |
-
----
-
-## Webhook Reliability
-
-PYLON provides at-least-once delivery with:
-
-- Exponential backoff retries (1s → 2s → 4s → 8s → 16s → 32s)
-- Timeout: 10 seconds per attempt
-- Max retries: 5 attempts
-- Idempotency via `X-Pylon-Idempotency-Key` header
-
-Return HTTP 200 to acknowledge receipt.
-
----
-
-## Support
-
-- **Questions:** See [Troubleshooting](../8-troubleshooting.md)
-- **Issues:** [GitHub](https://github.com/y-uno23/pylon)
-- **Email:** [support@pylonid.eu](mailto:support@pylonid.eu)
-
----
-
-## Next Steps
-
-- See [API Reference](../3-api-reference.md) for endpoint documentation
-- Try [Local Testing](../5-local-testing.md) with the emulator
-- Review [Webhooks Guide](../6-webhooks.md) for integration examples
-
----
-
-## Roadmap
-
-- **Q1 2026:** Official SDK releases for all listed languages
-- **Q2 2026:** Additional language support on request
-
-See [Changelog](../10-changelog.md) for updates.
+**Questions?** See [API Reference](../3-api-reference.md) or email [hello@pylonid.eu](mailto:hello@pylonid.eu)

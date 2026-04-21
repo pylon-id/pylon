@@ -1,14 +1,10 @@
-# Go SDK
+# Go Integration
 
-**Status:** 🔄 Planned. Not yet available.
-
-Official Go SDK for PYLON is under development. Use direct HTTP integration until released.
+Direct HTTP integration with Go's standard library.
 
 ---
 
-## Current Integration (Direct HTTP)
-
-Until the SDK is available, use Go's standard HTTP client:
+## Start a Verification
 
 ```go
 package main
@@ -21,46 +17,46 @@ import (
   "os"
 )
 
-type VerifyAgeRequest struct {{
-  Policy      AgePolicy `json:"policy"`
-  CallbackURL string    `json:"callbackUrl"`
-}}
+type VerifyRequest struct {
+  Policy      Policy `json:"policy"`
+  CallbackURL string `json:"callbackUrl"`
+}
 
-type AgePolicy struct {{
+type Policy struct {
   MinAge int `json:"minAge"`
-}}
+}
 
-type VerifyAgeResponse struct {{
+type VerifyResponse struct {
   VerificationID string `json:"verificationId"`
   Status         string `json:"status"`
   WalletURL      string `json:"walletUrl"`
-}}
+  RequestURI     string `json:"requestUri"`
+  ExpiresAt      string `json:"expiresAt"`
+}
 
-func main() {{
-  req := VerifyAgeRequest{{
-    Policy:      AgePolicy{{MinAge: 18}},
-    CallbackURL: "https://app.example.com/webhooks/pylon",
-  }}
+func main() {
+  body, _ := json.Marshal(VerifyRequest{
+    Policy:      Policy{MinAge: 18},
+    CallbackURL: "https://yourapp.com/webhooks/pylon",
+  })
 
-  body, _ := json.Marshal(req)
-  httpReq, _ := http.NewRequest("POST", "{BASE_URL}/v1/verify/age", bytes.NewBuffer(body))
-  httpReq.Header.Set("Content-Type", "application/json")
-  httpReq.Header.Set("Authorization", "Bearer "+os.Getenv("PYLON_API_KEY"))
+  req, _ := http.NewRequest("POST", "https://pylonid.eu/v1/verify/age", bytes.NewBuffer(body))
+  req.Header.Set("Content-Type", "application/json")
+  req.Header.Set("Authorization", "Bearer "+os.Getenv("PYLON_API_KEY"))
 
-  client := &http.Client{{}}
-  resp, err := client.Do(httpReq)
-  if err != nil {{
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
     panic(err)
-  }}
+  }
   defer resp.Body.Close()
 
-  var result VerifyAgeResponse
+  var result VerifyResponse
   json.NewDecoder(resp.Body).Decode(&result)
 
-  fmt.Printf("Verification ID: %s\\n", result.VerificationID)
-  fmt.Printf("Wallet URL: %s\\n", result.WalletURL)
-  // Redirect user to result.WalletURL
-}}
+  fmt.Printf("Verification: %s\n", result.VerificationID)
+  fmt.Printf("Wallet URL:   %s\n", result.WalletURL)
+  // Display result.WalletURL as QR code
+}
 ```
 
 ---
@@ -78,100 +74,51 @@ import (
   "io"
   "net/http"
   "os"
-  "strings"
 )
 
-type WebhookResult struct {{
-  VerificationID string `json:"verificationId"`
-  Type           string `json:"type"`
-  Result         string `json:"result"`
-}}
-
-func validateSignature(signature, body, secret string) bool {{
-  parts := strings.Split(signature, ",")
-  if len(parts) != 2 {{
-    return false
-  }}
-
-  t := strings.TrimPrefix(parts[0], "t=")
-  v1 := strings.TrimPrefix(parts[1], "v1=")
-
-  signedMessage := t + "." + body
+func validateSignature(body []byte, signature, secret string) bool {
   h := hmac.New(sha256.New, []byte(secret))
-  h.Write([]byte(signedMessage))
-  computed := hex.EncodeToString(h.Sum(nil))
+  h.Write(body)
+  computed := "sha256=" + hex.EncodeToString(h.Sum(nil))
+  return hmac.Equal([]byte(signature), []byte(computed))
+}
 
-  return hmac.Equal([]byte(v1), []byte(computed))
-}}
+type WebhookPayload struct {
+  Event          string                 `json:"event"`
+  VerificationID string                 `json:"verificationId"`
+  Status         string                 `json:"status"`
+  Result         map[string]interface{} `json:"result"`
+  Timestamp      string                 `json:"timestamp"`
+}
 
-func webhookHandler(w http.ResponseWriter, r *http.Request) {{
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
   signature := r.Header.Get("X-Pylon-Signature")
   body, _ := io.ReadAll(r.Body)
   secret := os.Getenv("PYLON_WEBHOOK_SECRET")
 
-  if !validateSignature(signature, string(body), secret) {{
-    w.WriteHeader(http.StatusUnauthorized)
-    w.Write([]byte("Invalid signature"))
+  if !validateSignature(body, signature, secret) {
+    http.Error(w, "Invalid signature", http.StatusUnauthorized)
     return
-  }}
+  }
 
-  var result WebhookResult
-  json.Unmarshal(body, &result)
+  var payload WebhookPayload
+  json.Unmarshal(body, &payload)
 
-  if result.Result == "verified" {{
+  if payload.Status == "verified" {
     // Grant access
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(`{{"received":true}}`))
-  }} else {{
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(`{{"received":true}}`))
-  }}
-}}
-
-func main() {{
-  http.HandleFunc("/webhooks/pylon", webhookHandler)
-  http.ListenAndServe(":3000", nil)
-}}
-```
-
----
-
-## Idempotency Handling
-
-```go
-func webhookHandler(w http.ResponseWriter, r *http.Request) {{
-  idempotencyKey := r.Header.Get("X-Pylon-Idempotency-Key")
-
-  // Check if already processed
-  if alreadyProcessed(idempotencyKey) {{
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(`{{"status":"already_processed"}}`))
-    return
-  }}
-
-  // Validate signature
-  signature := r.Header.Get("X-Pylon-Signature")
-  body, _ := io.ReadAll(r.Body)
-  secret := os.Getenv("PYLON_WEBHOOK_SECRET")
-
-  if !validateSignature(signature, string(body), secret) {{
-    w.WriteHeader(http.StatusUnauthorized)
-    return
-  }}
-
-  // Store idempotency key
-  storeIdempotencyKey(idempotencyKey)
-
-  // Process webhook
-  var result WebhookResult
-  json.Unmarshal(body, &result)
+    fmt.Printf("✅ %s: verified\n", payload.VerificationID)
+  } else {
+    fmt.Printf("❌ %s: %s\n", payload.VerificationID, payload.Status)
+  }
 
   w.WriteHeader(http.StatusOK)
-  w.Write([]byte(`{{"received":true}}`))
+  w.Write([]byte(`{"received":true}`))
+}
 
-  // Process asynchronously
-  go processWebhook(result)
-}}
+func main() {
+  http.HandleFunc("/webhooks/pylon", webhookHandler)
+  http.ListenAndServe(":3000", nil)
+}
 ```
 
 ---
@@ -179,45 +126,26 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {{
 ## Error Handling
 
 ```go
-resp, err := client.Do(httpReq)
-if err != nil {{
-  panic(err)
-}}
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+  fmt.Fprintf(os.Stderr, "Network error: %v\n", err)
+  return
+}
 
-switch resp.StatusCode {{
+switch resp.StatusCode {
+case 200:
+  // Success
 case 401:
-  fmt.Println("❌ Invalid API key")
-case 429:
-  fmt.Println("❌ Rate limited")
+  fmt.Fprintln(os.Stderr, "Invalid API key")
 case 400:
-  fmt.Println("❌ Invalid request")
+  fmt.Fprintln(os.Stderr, "Invalid request (check JSON, callbackUrl must be HTTPS)")
+case 429:
+  fmt.Fprintln(os.Stderr, "Rate limited — back off and retry")
 default:
-  fmt.Printf("❌ Error: %d\\n", resp.StatusCode)
-}}
+  fmt.Fprintf(os.Stderr, "Unexpected: %d\n", resp.StatusCode)
+}
 ```
 
 ---
 
-## Testing Locally
-
-Start the local emulator:
-
-```bash
-pylon-cli
-```
-
-Point requests to localhost:
-
-```go
-httpReq, _ := http.NewRequest("POST", "http://localhost:7777/v1/verify/age", bytes.NewBuffer(body))
-```
-
----
-
-## Roadmap
-
-- **Q1 2026:** Official Go SDK release with type-safe client
-
----
-
-**Questions?** See [Troubleshooting](../8-troubleshooting.md) or [API Reference](../3-api-reference.md)
+**Reference:** [API Reference](../3-api-reference.md) | [Webhooks](../6-webhooks.md) | [Troubleshooting](../8-troubleshooting.md)

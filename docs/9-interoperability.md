@@ -1,107 +1,90 @@
 # Wallet Interoperability
 
-PYLON supports major EUDI wallet standards and guides you through current testing and integration status.
+PylonID works with any EUDI wallet that implements the required standards.
 
-***
+---
 
-## Standards Compliance
+## Required Standards
 
-All compliant EUDI wallets must support:
+Any compliant wallet must support:
 
-| Standard       | Status           | Purpose                       |
-|----------------|------------------|-------------------------------|
-| OID4VP 1.0     | ✅ Final (Jun 2025) | Verifiable presentations protocol |
-| SD-JWT VC      | ✅ Standard       | Selective disclosure credentials |
-| ISO 18013-5/7  | ✅ Required       | Mobile document format        |
-| FAPI 2 Baseline| ✅ Standard       | OAuth 2.0 security            |
+| Standard | Purpose |
+|----------|---------|
+| OpenID4VP | Verifiable presentation protocol |
+| SD-JWT-VC | Selective disclosure credentials |
+| ES256 | Signature algorithm (ECDSA P-256) |
 
-***
+PylonID uses the `eudi-openid4vp://` URI scheme for wallet invocation, as specified in the EUDI Architecture Reference Framework.
 
-## Government Wallets
+---
 
-| Country    | Wallet Name | Status    | Testing Status | Notes                          |
-|------------|-------------|-----------|----------------|--------------------------------|
-| Austria    | eID Austria | ✅ Live   | ✅ Tested      | Integrating EUDI features       |
-| Italy      | IO App      | ✅ Live   | ✅ Tested      | Includes EUDI credentials       |
-| Germany    | BDr Wallet  | 🔄 Sandbox| 🔄 Testing     | Sandbox launch expected Nov 2025|
-| Greece     | TBD         | 🔄 Dev    | ⏳ Pending     | 2025-2026 rollout               |
-| Luxembourg | TBD         | 🔄 Dev    | ⏳ Pending     | 2025-2026 rollout               |
-| Poland     | TBD         | 🔄 Dev    | ⏳ Pending     | 2025-2026 rollout               |
+## Wallet Landscape
 
-***
+### EUDI Reference Wallet
 
-## Commercial Wallets
+The EU-funded reference implementation. PylonID is built and tested against this wallet.
 
-| Provider | Status  | Notes                       |
-|----------|---------|-----------------------------|
-| Lissi    | 🔄 Beta | Testing OID4VP compliance   |
-| Verimi   | 🔄 Beta | Testing SD-JWT support      |
-| walt.id  | 🔄 Beta | Testing ISO 18013-5         |
+- [EUDI Wallet Reference Implementation](https://github.com/eu-digital-identity-wallet)
 
-*Feature support varies—test in sandbox before production.*
+### Government Wallets
 
-***
+EU member states are deploying national EUDI wallets under eIDAS 2.0:
 
-## Wallet Service Domain Status
+| Country | Status | Notes |
+|---------|--------|-------|
+| Germany | Pilot | BDr Wallet |
+| Austria | Development | Building on eID Austria |
+| Italy | Development | IO App integration |
+| Others | Planned | Dec 2026 deadline for all member states |
 
-`wallet.pylonid.eu` is currently a **placeholder** with no active wallet service.
+### Commercial Wallets
 
-Use:
+| Provider | Status |
+|----------|--------|
+| Lissi | Developing EUDI support |
+| Verimi | Developing EUDI support |
+| walt.id | Developing EUDI support |
 
-- Local emulator (`http://localhost:7777`) for development
-- Sandbox environment with real wallets for integration tests
-- Production environment with actual user wallets
+*Interoperability depends on each wallet's OID4VP and SD-JWT-VC compliance. Test with each wallet before production use.*
 
-until a dedicated wallet service is launched.
+---
 
-***
+## What PylonID Validates
 
-## Testing Your Integration
+Regardless of which wallet presents the credential, PylonID verifies:
 
-Recommended sequence:
+1. **Credential format** — valid SD-JWT-VC
+2. **Credential type** — `urn:eudi:pid:1` (EU Person Identification Data)
+3. **Issuer signature** — ES256 verified against issuer JWKS
+4. **Key binding** — wallet proves credential ownership
+5. **Freshness** — presentation created within 5-minute window
+6. **Nonce** — matches the original request (replay protection)
+7. **Disclosed claims** — `age_over_18` present and valid
 
-1. **Local emulator (pylon-cli):** Instant and deterministic
-2. **Sandbox with German wallet (Nov 2025+):** Real wallet, test backend
-3. **Production:** Live users, production backend
+---
 
-***
+## Testing Recommendations
 
-## Known Compatibility Notes
+1. **Start with the emulator** — deterministic, no wallet needed
+2. **Test with EUDI reference wallet** — the baseline implementation
+3. **Test with target wallets** — whichever wallets your users will have
+4. **Monitor in production** — track success/failure rates per wallet type
 
-- OID4VP and selective disclosure are consistently supported
-- Age > 18 verification supported
-- HMAC-SHA256 webhook security standard enforced
-- Attribute support and disclosure levels vary by wallet
+---
 
-***
+## Conformance
 
-## Issue Resolution
+- EUDI Wallet Conformance Tests: [github.com/EWC-consortium/ewc-wallet-conformance](https://github.com/EWC-consortium/ewc-wallet-conformance)
+- PylonID's verifier metadata is published at `/.well-known/openid-credential-verifier`
 
-Confirm issues via local emulator and sandbox.
-
-For unresolved issues:
-
-- Contact [support@pylonid.eu](mailto:support@pylonid.eu)
-- Use priority support for production users with paid plans
-
-***
-
-## Public Conformance & Contribution
-
-- Conformance tests at [github.com/EWC-consortium/ewc-wallet-conformance](https://github.com/EWC-consortium/ewc-wallet-conformance)
-- Quarterly results published
-- Contribution via email, GitHub issues, Discord
-
-***
+---
 
 ## Roadmap
 
-- Q1 2026: Test against Lissi, Verimi, walt.id
-- Q2 2026: Native iOS/Android EUDI wallet support
-- Q3 2026: EU member state wallets in testing
+- **Q3 2026**: Test against commercial wallets (Lissi, Verimi, walt.id)
+- **Q4 2026**: Track and publish wallet compatibility matrix
+- **2027**: EU member state wallets mandatory — broad testing
 
-***
+---
 
-**Don’t see your wallet?** Email [support@pylonid.eu](mailto:support@pylonid.eu) to request testing.
-
-]
+**Wallet not working?** Report via [GitHub Issues](https://github.com/pylon-id/pylon/issues) or email [hello@pylonid.eu](mailto:hello@pylonid.eu)

@@ -1,128 +1,158 @@
 # Core Concepts
 
-PYLON abstracts three standards: OID4VP, SD-JWT VC, and ISO 18013-5. You don't need to know them to use PYLON, but understanding the fundamentals helps.
+PylonID abstracts three standards: OpenID4VP, SD-JWT-VC, and ES256 signatures. You don't need to know them to use PylonID, but understanding the fundamentals helps.
+
+---
 
 ## Verifiable Credentials (VCs)
 
-A **Verifiable Credential** is a digitally signed claim about an attribute.
+A **Verifiable Credential** is a digitally signed claim about a person, issued by a trusted authority.
 
-**Example:** Government issues a credential: "Anna Müller, born 1990, age > 18"
+**Example:** A government issues a credential: "Anna Müller, born 1990, age over 18: true"
 
 Properties:
 - **Issued by a trusted entity** (e.g., Austrian government)
 - **Cryptographically signed** (can't be forged)
-- **Expires** (e.g., 5 years from issuance)
-- **Selective disclosure** (reveal only what's needed—e.g., just "age > 18", not full birthdate)
+- **Has an expiry** (e.g., 5 years from issuance)
+- **Supports selective disclosure** (reveal only "age over 18", not full birthdate)
 
 ---
 
-## OID4VP: Presentation Protocol
+## SD-JWT-VC: Selective Disclosure
 
-**OID4VP** = OpenID Connect for Verifiable Presentations
+**SD-JWT-VC** = Selective Disclosure JSON Web Token Verifiable Credential
 
-It's the protocol that says:
-1. Your app requests a presentation: "Prove your age >= 18"
-2. Wallet responds with a **presentation** (selective disclosure proof)
-3. Your app verifies the cryptographic proof
+A JWT where individual claims can be selectively revealed by the holder.
 
-**In PYLON:** You call `POST /v1/verify/age`. PYLON handles OID4VP handshakes internally, verifying the selective disclosure SD-JWT proof.
+**How it works:**
+1. Issuer creates a JWT with hashed claim placeholders (`_sd` array)
+2. Each real claim value is in a separate **disclosure** (base64-encoded)
+3. Holder chooses which disclosures to reveal
+4. Verifier receives the JWT + selected disclosures, reconstructs only the revealed claims
 
----
-
-## SD-JWT VC: Self-Issued Credentials
-
-**SD-JWT** = Selective Disclosure JSON Web Token
-
-It's a JSON Web Token that allows the wallet holder to selectively reveal claims.
-
-**Example:**
-- Token contains: name, birthdate, address
-- Wallet user chooses: reveal only "age > 18", hiding other claims
-- Server receives cryptographic proof with only necessary claims
-
-**In PYLON:** The server verifies SD-JWT signature and claims integrity automatically.
+**In PylonID:** When a wallet responds with a VP token, PylonID parses the SD-JWT-VC, matches disclosure hashes against `_sd` arrays, verifies the issuer signature, and extracts the revealed claims (e.g., `age_over_18`).
 
 ---
 
-## ISO 18013-5/7: Mobile Document Standard
+## OpenID4VP: Presentation Protocol
 
-**ISO 18013** = International standard for mobile digital identity documents
+**OpenID4VP** = OpenID for Verifiable Presentations
 
-Used by EUDI Wallets to manage government-issued IDs supporting offline, QR code scanning, and interoperability.
+The protocol for requesting and receiving verifiable credentials from wallets.
 
-**In PYLON:** Currently supports ISO 18013-5. ISO 18013-7 support is planned.
-
----
-
-## Verification Flow
-
-The flow when a user verifies age through PYLON:
+**The flow:**
 
 ```
-1. Your app calls: POST /v1/verify/age
-   ↓
-2. PYLON generates OID4VP request
-   ↓
-3. User scans QR code with EUDI wallet app
-   ↓
-4. Wallet prompts: "Verify age >= 18?"
-   ↓
-5. User accepts
-   ↓
-6. Wallet sends SD-JWT selective disclosure proof
-   ↓
-7. PYLON validates cryptographic proof
-   ↓
-8. PYLON verifies issuer trust & credential validity
-   ↓
-9. PYLON checks compliance to policy (min age)
-   ↓
-10. PYLON sends webhook with verification result
+1. PylonID creates a signed authorization request JWT containing:
+   - presentation_definition: "I need age_over_18 from a PID credential"
+   - response_uri: where the wallet should send the response
+   - nonce: replay protection
+
+2. Wallet fetches this request via request_uri
+
+3. User sees: "PylonID wants to verify your age. Share age_over_18?"
+
+4. User consents → wallet creates VP token:
+   - SD-JWT-VC with only age_over_18 disclosed
+   - Key Binding JWT (proves wallet holds the private key)
+
+5. Wallet POSTs VP token to PylonID's response_uri
+
+6. PylonID validates everything and fires webhook
 ```
 
-The entire cryptography is handled server-side by PYLON.
+**In PylonID:** You call `POST /v1/verify/age`. PylonID handles the entire OID4VP handshake — request signing, nonce management, token validation, issuer verification.
+
+---
+
+## ES256 Signatures
+
+**ES256** = ECDSA using P-256 curve and SHA-256
+
+Used throughout the EUDI ecosystem:
+- **PID Issuer** signs credentials with ES256
+- **PylonID** signs authorization requests with ES256
+- **Wallet** signs Key Binding JWTs with ES256
+
+PylonID verifies issuer signatures by fetching the issuer's public keys via JWKS (JSON Web Key Set).
+
+---
+
+## Key Binding JWT
+
+When a wallet presents a credential, it includes a **Key Binding JWT** — a short-lived token proving the wallet actually holds the private key associated with the credential.
+
+PylonID verifies:
+- **Nonce** matches the authorization request
+- **Audience** matches PylonID's client_id
+- **Freshness** — issued within the last 5 minutes
+- **Signature** — valid ES256 against the `cnf.jwk` in the credential
+
+---
+
+## The Verification Flow (Complete)
+
+```
+POST /v1/verify/age
+  → PylonID creates verification record with nonce
+  → Returns eudi-openid4vp:// wallet URL
+
+Wallet scans QR code
+  → GET /v1/oid4vp/request/:id
+  → Receives signed ES256 JWT with presentation_definition
+
+User consents in wallet
+  → POST /v1/oid4vp/response
+  → Sends vp_token (SD-JWT-VC) + state
+
+PylonID validates:
+  1. Parse SD-JWT → issuer JWT + disclosures + key binding JWT
+  2. Check issuer URL and VCT (urn:eudi:pid:1)
+  3. Fetch issuer JWKS → verify ES256 signature on issuer JWT
+  4. Verify Key Binding JWT (nonce, audience, freshness, signature)
+  5. Match disclosure hashes against _sd arrays
+  6. Reconstruct revealed claims → extract age_over_18
+  7. Update verification status → fire webhook
+```
+
+---
+
+## Trust Model
+
+PylonID trusts credentials based on:
+
+1. **Issuer identity** — credential must come from a configured trusted PID Issuer
+2. **Cryptographic signature** — issuer's ES256 signature must verify against their published JWKS
+3. **Credential type** — must be `urn:eudi:pid:1` (EU Person Identification Data)
+4. **Freshness** — Key Binding JWT must be recent (5-minute window)
+5. **Binding** — wallet must prove possession of the credential's private key
 
 ---
 
 ## Wallet Ecosystems
 
-Supported wallet types:
+### Government EUDI Wallets
+Issued by EU member states under eIDAS 2.0. Austria, Germany, Italy, and others are deploying wallets.
 
-### 1. Government EUDI Wallets
+### Commercial EUDI Wallets
+Third-party wallets (Lissi, Verimi, walt.id) implementing the same standards.
 
-Issued by member states: Austria, Germany, Italy, Poland.
+### Mobile OS Integration
+Native EUDI wallet support planned for iOS and Android.
 
-### 2. Commercial EUDI Wallets
-
-Third-party wallets like Lissi, Verimi.
-
-### 3. Upcoming Mobile Device Wallets
-
-Native support planned in iOS/Android OS.
+All compliant wallets speak the same protocol — PylonID works with any of them.
 
 See [Wallet Interoperability](./9-interoperability.md) for details.
 
 ---
 
-## Importance of PYLON
-
-- Based on open standards
-- Neutral to wallet vendor
-- Future-proof for mandatory EUDI compliance
-- eIDAS 2.0 compliant from launch
-
----
-
 ## Next Steps
 
-- Try the [Quickstart](./1-quickstart.md)
-- Deploy with [Sandbox Guide](./4-sandbox-guide.md)
-- Deep dive in [API Reference](./3-api-reference.md)
-- Ensure production reliability with [Webhooks](./6-webhooks.md)
-- Use [Local Emulator](./5-local-testing.md) for offline dev
+- [Quickstart](./1-quickstart.md) — verify your first age
+- [API Reference](./3-api-reference.md) — all endpoints
+- [Webhooks](./6-webhooks.md) — production webhook handling
+- [Security](./7-security-compliance.md) — encryption and compliance
 
 ---
 
-## Questions?
-
-Refer to [Troubleshooting](./8-troubleshooting.md) or contact [support@pylonid.eu](mailto:support@pylonid.eu).
+**Questions?** See [Troubleshooting](./8-troubleshooting.md) or email [hello@pylonid.eu](mailto:hello@pylonid.eu)
